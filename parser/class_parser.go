@@ -55,6 +55,8 @@ type ClassDiagramOptions struct {
 	IgnoredDirectories []string
 	RenderingOptions   map[RenderingOption]interface{}
 	Recursive          bool
+	ExcludePattern     string
+	Verbose            bool
 }
 
 // RenderingOptions will allow the class parser to optionally enebale or disable the things to render.
@@ -123,6 +125,8 @@ type ClassParser struct {
 	allImports         map[string]string
 	allAliases         map[string]*Alias
 	allRenamedStructs  map[string]map[string]string
+	excludePattern     string
+	verbose            bool
 }
 
 // NewClassDiagramWithOptions returns a new classParser with which can Render the class diagram of
@@ -147,6 +151,8 @@ func NewClassDiagramWithOptions(options *ClassDiagramOptions) (*ClassParser, err
 		allImports:        make(map[string]string),
 		allAliases:        make(map[string]*Alias),
 		allRenamedStructs: make(map[string]map[string]string),
+		excludePattern:    options.ExcludePattern,
+		verbose:           options.Verbose,
 	}
 	ignoreDirectoryMap := map[string]struct{}{}
 	for _, dir := range options.IgnoredDirectories {
@@ -166,6 +172,12 @@ func NewClassDiagramWithOptions(options *ClassDiagramOptions) (*ClassParser, err
 						return filepath.SkipDir
 					}
 					classParser.parseDirectory(path)
+				} else if !info.IsDir() && options.ExcludePattern != "" {
+					// Check if file should be excluded based on pattern when not handling directories
+					matched, err := regexp.MatchString(options.ExcludePattern, info.Name())
+					if err == nil && matched && classParser.verbose {
+						fmt.Fprintf(os.Stderr, "Excluding file: %s/%s\n", path, info.Name())
+					}
 				}
 				return nil
 			})
@@ -197,13 +209,15 @@ func NewClassDiagramWithOptions(options *ClassDiagramOptions) (*ClassParser, err
 
 // NewClassDiagram returns a new classParser with which can Render the class diagram of
 // files in the given directory
-func NewClassDiagram(directoryPaths []string, ignoreDirectories []string, recursive bool) (*ClassParser, error) {
+func NewClassDiagram(directoryPaths []string, ignoreDirectories []string, recursive bool, excludePattern string, verbose bool) (*ClassParser, error) {
 	options := &ClassDiagramOptions{
 		Directories:        directoryPaths,
 		IgnoredDirectories: ignoreDirectories,
 		Recursive:          recursive,
 		RenderingOptions:   map[RenderingOption]interface{}{},
 		FileSystem:         afero.NewOsFs(),
+		ExcludePattern:     excludePattern,
+		Verbose:            verbose,
 	}
 	return NewClassDiagramWithOptions(options)
 }
@@ -245,7 +259,20 @@ func (p *ClassParser) parseImports(impt *ast.ImportSpec) {
 
 func (p *ClassParser) parseDirectory(directoryPath string) error {
 	fs := token.NewFileSet()
-	result, err := parser.ParseDir(fs, directoryPath, nil, 0)
+	fileFilter := func(info os.FileInfo) bool {
+		// Skip test files or any file matching the exclude pattern
+		if p.excludePattern != "" {
+			matched, err := regexp.MatchString(p.excludePattern, info.Name())
+			if err == nil && matched {
+				if p.verbose {
+					fmt.Fprintf(os.Stderr, "Excluding file: %s/%s\n", directoryPath, info.Name())
+				}
+				return false
+			}
+		}
+		return true
+	}
+	result, err := parser.ParseDir(fs, directoryPath, fileFilter, 0)
 	if err != nil {
 		return err
 	}

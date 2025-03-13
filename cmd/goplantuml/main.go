@@ -4,12 +4,20 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	goplantuml "github.com/jfeliu007/goplantuml/parser"
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
+
+	goplantuml "github.com/jfeliu007/goplantuml/parser"
+)
+
+// Version information - to be set at build time
+var (
+	// version will be injected at build time using -ldflags
+	version = "development"
 )
 
 // RenderingOptionSlice will implements the sort interface
@@ -32,8 +40,17 @@ func (as RenderingOptionSlice) Swap(i, j int) {
 }
 
 func main() {
+	// Add version flag
+	showVersion := flag.Bool("version", false, "display version information")
+	flag.BoolVar(showVersion, "V", false, "alias for --version")
+
 	recursive := flag.Bool("recursive", false, "walk all directories recursively")
+	flag.BoolVar(recursive, "r", false, "alias for --recursive")
 	ignore := flag.String("ignore", "", "comma separated list of folders to ignore")
+	excludePattern := flag.String("exclude-pattern", "", "regex pattern to exclude files (e.g. \"_test\\.go$|_mock\\.go$\")")
+	flag.StringVar(excludePattern, "e", "", "alias for --exclude-pattern")
+	verbose := flag.Bool("verbose", false, "output names of files filtered by exclude-pattern to stderr")
+	flag.BoolVar(verbose, "v", false, "alias for --verbose")
 	showAggregations := flag.Bool("show-aggregations", false, "renders public aggregations even when -hide-connections is used (do not render by default)")
 	hideFields := flag.Bool("hide-fields", false, "hides fields")
 	hideMethods := flag.Bool("hide-methods", false, "hides methods")
@@ -49,6 +66,14 @@ func main() {
 	aggregatePrivateMembers := flag.Bool("aggregate-private-members", false, "Show aggregations for private members. Ignored if -show-aggregations is not used.")
 	hidePrivateMembers := flag.Bool("hide-private-members", false, "Hide private fields and methods")
 	flag.Parse()
+
+	// If version flag is set, display version and exit
+	if *showVersion {
+		fmt.Printf("goplantuml version %s\n", version)
+		fmt.Printf("built with %s\n", runtime.Version())
+		os.Exit(0)
+	}
+
 	renderingOptions := map[goplantuml.RenderingOption]interface{}{
 		goplantuml.RenderConnectionLabels:  *showConnectionLabels,
 		goplantuml.RenderFields:            !*hideFields,
@@ -99,7 +124,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	result, err := goplantuml.NewClassDiagram(dirs, ignoredDirectories, *recursive)
+	result, err := goplantuml.NewClassDiagram(dirs, ignoredDirectories, *recursive, *excludePattern, *verbose)
 	result.SetRenderingOptions(renderingOptions)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err.Error())
